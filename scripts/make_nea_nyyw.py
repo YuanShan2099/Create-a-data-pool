@@ -72,7 +72,7 @@ async def main():
             )
         )
 
-        await page.goto(URL, wait_until="networkidle", timeout=60000)
+        await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
         await page.wait_for_selector("#showData0 li", timeout=60000)
 
         for page_no in range(1, 6):
