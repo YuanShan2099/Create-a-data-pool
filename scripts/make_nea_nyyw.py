@@ -8,8 +8,8 @@ from feedgen.feed import FeedGenerator
 from playwright.async_api import async_playwright
 
 
-URL = "https://www.nea.gov.cn/xwzx/nyyw.htm"
-BASE = "https://www.nea.gov.cn"
+URL = "http://www.nea.gov.cn/xwzx/nyyw.htm"
+BASE = "http://www.nea.gov.cn"
 
 output_dir = Path("docs")
 output_dir.mkdir(parents=True, exist_ok=True)
