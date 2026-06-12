@@ -78,12 +78,12 @@ async def main():
         )
 
         await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
-        await page.wait_for_selector("#showData0 li", timeout=60000)
+        await page.wait_for_function("document.querySelectorAll('#showData0 li').length > 0",timeout=90000)
 
         for page_no in range(1, 6):
             print(f"正在抓取第 {page_no} 页...")
 
-            await page.wait_for_selector("#showData0 li", timeout=60000)
+            await page.wait_for_function("document.querySelectorAll('#showData0 li').length > 0",timeout=90000)
             await page.wait_for_timeout(1500)
 
             html = await page.content()
