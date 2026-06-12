@@ -9,10 +9,7 @@ from feedgen.feed import FeedGenerator
 from playwright.async_api import async_playwright
 
 
-# 用 https 抓网页源码
 URL = "https://www.nea.gov.cn/xwzx/nyyw.htm"
-
-# 最终文章链接也建议用 https
 BASE = "https://www.nea.gov.cn"
 
 output_dir = Path("docs")
@@ -48,8 +45,6 @@ def extract_items_from_html(html):
             continue
 
         link = urljoin(BASE, href)
-
-        # 如果链接被拼成 http，可以统一替换为 https
         link = link.replace("http://www.nea.gov.cn", "https://www.nea.gov.cn")
 
         results.append({
@@ -73,7 +68,7 @@ async def main():
                 "--disable-dev-shm-usage",
                 "--allow-running-insecure-content",
                 "--disable-web-security",
-            ]
+            ],
         )
 
         page = await browser.new_page(
@@ -92,9 +87,11 @@ async def main():
         page.on("requestfailed", lambda req: print(f"[requestfailed] {req.url} | {req.failure}"))
 
         # ============================================================
-        # 关键修改：不用 page.goto(URL)，而是先用 requests 抓源码，
-        # 再把源码里的 http://www.nea.gov.cn/2015nyj/ 替换为 https。
-        # 然后用 page.set_content 让 Playwright 渲染修改后的页面。
+        # 关键修改 1：
+        # 先用 requests 抓国家能源局网页源码；
+        # 把源码中 http://www.nea.gov.cn/2015nyj/ 下的脚本资源替换为 https；
+        # 再用 Playwright route 拦截原页面请求，把修改后的 HTML 返回给浏览器。
+        # 这样页面 URL 仍然是 URL，不会变成 about:blank。
         # ============================================================
         resp = requests.get(
             URL,
@@ -105,21 +102,31 @@ async def main():
                     "Chrome/120.0.0.0 Safari/537.36"
                 )
             },
-            timeout=30
+            timeout=30,
         )
         resp.encoding = "utf-8"
 
         html_source = resp.text.replace(
             "http://www.nea.gov.cn/2015nyj/",
-            "https://www.nea.gov.cn/2015nyj/"
+            "https://www.nea.gov.cn/2015nyj/",
         )
 
-        await page.set_content(
-            html_source,
-            wait_until="domcontentloaded",
-            timeout=90000
+        # 加 base，防止页面中的相对路径在 route 拦截后失效
+        html_source = html_source.replace(
+            "<head>",
+            '<head><base href="https://www.nea.gov.cn/xwzx/nyyw.htm">',
         )
 
+        async def fulfill_modified_html(route):
+            await route.fulfill(
+                status=200,
+                content_type="text/html; charset=utf-8",
+                body=html_source,
+            )
+
+        await page.route("**/xwzx/nyyw.htm", fulfill_modified_html)
+
+        await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
         await page.wait_for_timeout(15000)
 
         print("页面标题：", await page.title())
@@ -134,9 +141,8 @@ async def main():
             print("页面长度：", len(html))
             print("页面前1000字符：")
             print(html[:1000])
-            print("GitHub Actions 环境中新闻列表未渲染，保留旧 RSS，不更新文件。")
             await browser.close()
-            return
+            raise RuntimeError("GitHub Actions 环境中新闻列表仍未渲染：#showData0 li 数量为 0")
 
         # ============================================================
         # 抓取第 1—5 页
@@ -147,7 +153,7 @@ async def main():
             try:
                 await page.wait_for_function(
                     "document.querySelectorAll('#showData0 li').length > 0",
-                    timeout=90000
+                    timeout=90000,
                 )
             except Exception as e:
                 print(f"第 {page_no} 页等待新闻列表失败：{e}")
@@ -184,9 +190,13 @@ async def main():
 
     print(f"合计抓到 {len(all_items)} 条去重新闻")
 
+    # ============================================================
+    # 关键修改 2：
+    # 调试阶段不要 return，否则 Actions 会显示成功但 RSS 其实是空的。
+    # 如果没抓到新闻，直接报错。
+    # ============================================================
     if len(all_items) == 0:
-        print("本次没有抓到任何新闻，保留旧 RSS，不更新文件。")
-        return
+        raise RuntimeError("本次没有抓到任何新闻，拒绝生成空 RSS。")
 
     fg = FeedGenerator()
     fg.title("国家能源局-能源要闻")
