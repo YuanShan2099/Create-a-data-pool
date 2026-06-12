@@ -77,8 +77,31 @@ async def main():
             )
         )
 
+        #await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
+        #await page.wait_for_function("document.querySelectorAll('#showData0 li').length > 0",timeout=90000)
+
+        page.on("console", lambda msg: print(f"[console:{msg.type}] {msg.text}"))
+        page.on("pageerror", lambda exc: print(f"[pageerror] {exc}"))
+        page.on("requestfailed", lambda req: print(f"[requestfailed] {req.url} | {req.failure}"))
+        
         await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
-        await page.wait_for_function("document.querySelectorAll('#showData0 li').length > 0",timeout=90000)
+        
+        print("页面标题：", await page.title())
+        print("当前URL：", page.url)
+        print("showData0 数量：", await page.locator("#showData0").count())
+        
+        await page.wait_for_timeout(15000)
+        
+        li_count = await page.locator("#showData0 li").count()
+        print("等待15秒后 li 数量：", li_count)
+        
+        html = await page.content()
+        print("页面长度：", len(html))
+        print("页面前1000字符：")
+        print(html[:1000])
+        
+        if li_count == 0:
+            raise RuntimeError("GitHub Actions 环境中新闻列表未渲染：#showData0 li 数量为 0")
 
         for page_no in range(1, 6):
             print(f"正在抓取第 {page_no} 页...")
