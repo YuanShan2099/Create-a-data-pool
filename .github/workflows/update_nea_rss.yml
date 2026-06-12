@@ -23,7 +23,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install playwright beautifulsoup4 feedgen
+          pip install playwright beautifulsoup4 feedgen requests
           python -m playwright install --with-deps chromium
 
       - name: Generate RSS
