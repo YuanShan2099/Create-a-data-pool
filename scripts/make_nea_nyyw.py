@@ -61,7 +61,12 @@ async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--allow-running-insecure-content",
+                "--disable-web-security",
+            ]
         )
 
         page = await browser.new_page(
