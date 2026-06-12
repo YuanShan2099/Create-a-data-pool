@@ -3,13 +3,17 @@ from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import urljoin
 
+import requests
 from bs4 import BeautifulSoup
 from feedgen.feed import FeedGenerator
 from playwright.async_api import async_playwright
 
 
-URL = "http://www.nea.gov.cn/xwzx/nyyw.htm"
-BASE = "http://www.nea.gov.cn"
+# 用 https 抓网页源码
+URL = "https://www.nea.gov.cn/xwzx/nyyw.htm"
+
+# 最终文章链接也建议用 https
+BASE = "https://www.nea.gov.cn"
 
 output_dir = Path("docs")
 output_dir.mkdir(parents=True, exist_ok=True)
@@ -45,6 +49,9 @@ def extract_items_from_html(html):
 
         link = urljoin(BASE, href)
 
+        # 如果链接被拼成 http，可以统一替换为 https
+        link = link.replace("http://www.nea.gov.cn", "https://www.nea.gov.cn")
+
         results.append({
             "title": title,
             "link": link,
@@ -77,20 +84,50 @@ async def main():
             )
         )
 
-        #await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
-        #await page.wait_for_function("document.querySelectorAll('#showData0 li').length > 0",timeout=90000)
+        page.set_default_timeout(90000)
+        page.set_default_navigation_timeout(90000)
 
         page.on("console", lambda msg: print(f"[console:{msg.type}] {msg.text}"))
         page.on("pageerror", lambda exc: print(f"[pageerror] {exc}"))
         page.on("requestfailed", lambda req: print(f"[requestfailed] {req.url} | {req.failure}"))
-        
-        await page.goto(URL, wait_until="domcontentloaded", timeout=90000)
-        
+
+        # ============================================================
+        # 关键修改：不用 page.goto(URL)，而是先用 requests 抓源码，
+        # 再把源码里的 http://www.nea.gov.cn/2015nyj/ 替换为 https。
+        # 然后用 page.set_content 让 Playwright 渲染修改后的页面。
+        # ============================================================
+        resp = requests.get(
+            URL,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            },
+            timeout=30
+        )
+        resp.encoding = "utf-8"
+
+        html_source = resp.text.replace(
+            "http://www.nea.gov.cn/2015nyj/",
+            "https://www.nea.gov.cn/2015nyj/"
+        )
+
+        await page.set_content(
+            html_source,
+            wait_until="domcontentloaded",
+            timeout=90000
+        )
+
+        await page.wait_for_timeout(15000)
+
         print("页面标题：", await page.title())
         print("当前URL：", page.url)
         print("showData0 数量：", await page.locator("#showData0").count())
-        
-        await page.wait_for_timeout(15000)
+
+        li_count = await page.locator("#showData0 li").count()
+        print("替换脚本地址后 li 数量：", li_count)
 
         if li_count == 0:
             html = await page.content()
@@ -101,10 +138,21 @@ async def main():
             await browser.close()
             return
 
+        # ============================================================
+        # 抓取第 1—5 页
+        # ============================================================
         for page_no in range(1, 6):
             print(f"正在抓取第 {page_no} 页...")
 
-            await page.wait_for_function("document.querySelectorAll('#showData0 li').length > 0",timeout=90000)
+            try:
+                await page.wait_for_function(
+                    "document.querySelectorAll('#showData0 li').length > 0",
+                    timeout=90000
+                )
+            except Exception as e:
+                print(f"第 {page_no} 页等待新闻列表失败：{e}")
+                break
+
             await page.wait_for_timeout(1500)
 
             html = await page.content()
@@ -124,13 +172,21 @@ async def main():
                 try:
                     await pager.get_by_text(next_page_no, exact=True).click(timeout=10000)
                 except Exception:
-                    await pager.get_by_text("下一页").click(timeout=10000)
+                    try:
+                        await pager.get_by_text("下一页").click(timeout=10000)
+                    except Exception as e:
+                        print(f"点击第 {page_no + 1} 页失败：{e}")
+                        break
 
                 await page.wait_for_timeout(2000)
 
         await browser.close()
 
     print(f"合计抓到 {len(all_items)} 条去重新闻")
+
+    if len(all_items) == 0:
+        print("本次没有抓到任何新闻，保留旧 RSS，不更新文件。")
+        return
 
     fg = FeedGenerator()
     fg.title("国家能源局-能源要闻")
